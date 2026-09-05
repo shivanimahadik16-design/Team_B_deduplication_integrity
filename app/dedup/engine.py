@@ -5,16 +5,13 @@ from app.dedup.delta import (
     calculate_delta_size,
     calculate_savings_ratio,
 )
+from app.index.unified import HashCollisionError
+from app.merkle.tree import merkle_root_or_empty
 from app.models.dedup import DedupResult
 
 
 class IndexVersionMismatchError(Exception):
-    """
-    Raised when the requested index version does not match
-    the currently selected index.
-    """
-
-    pass
+    """Raised when the requested index version does not match the live index."""
 
 
 class DeduplicationEngine:
@@ -40,11 +37,11 @@ class DeduplicationEngine:
         chunks: list[Any],
         algorithm: str = "sha256",
         expected_index_version: str | None = None,
+        previous_version_hashes: list[str] | None = None,
+        previous_version_reference: str | None = None,
+        optimization_metric: str = "minimize_delta",
+        index_backend: str | None = None,
     ) -> DedupResult:
-
-        # ---------------------------------------------
-        # 1. Validate index version
-        # ---------------------------------------------
 
         actual_index_version = self.index.index_version
 
@@ -58,88 +55,77 @@ class DeduplicationEngine:
                 f"actual={actual_index_version}"
             )
 
-        # ---------------------------------------------
-        # 2. Process chunks
-        # ---------------------------------------------
-
         unique_chunks = 0
         duplicate_chunks = 0
-
         unique_chunk_sizes = []
+        version_delta_sizes = []
+        previous_set = set(previous_version_hashes or [])
+        ordered_hashes = []
 
         for chunk in chunks:
-
             chunk_hash = self._get_chunk_hash(chunk)
             chunk_size = self._get_chunk_size(chunk)
+            ordered_hashes.append(chunk_hash)
 
-            existing_chunk = self.index.search(chunk_hash)
+            if previous_version_hashes is not None and chunk_hash not in previous_set:
+                version_delta_sizes.append(chunk_size)
+
+            existing_chunk = self._lookup_chunk(chunk_hash)
+            stored_size = None
+            if hasattr(self.index, "get_size"):
+                stored_size = self.index.get_size(chunk_hash)
 
             if existing_chunk is not None:
-
-                # Existing hash means this chunk
-                # can be reused.
+                if stored_size is not None and stored_size != chunk_size:
+                    raise HashCollisionError(
+                        f"hash collision for {chunk_hash}: "
+                        f"stored_size={stored_size}, new_size={chunk_size}"
+                    )
                 duplicate_chunks += 1
-
             else:
-
-                # New hash means new data must be stored.
                 unique_chunks += 1
-
                 unique_chunk_sizes.append(chunk_size)
-
-                self.index.insert(
-                    chunk_hash,
-                    chunk,
-                )
-
-        # ---------------------------------------------
-        # 3. File statistics
-        # ---------------------------------------------
+                try:
+                    self.index.insert(
+                        chunk_hash,
+                        self._get_chunk_reference(chunk),
+                        size=chunk_size,
+                    )
+                except TypeError:
+                    self.index.insert(
+                        chunk_hash,
+                        self._get_chunk_reference(chunk),
+                    )
 
         total_chunks = len(chunks)
+        original_size = sum(self._get_chunk_size(chunk) for chunk in chunks)
 
-        original_size = sum(
-            self._get_chunk_size(chunk)
-            for chunk in chunks
-        )
+        if previous_version_hashes is not None:
+            delta_size = calculate_delta_size(version_delta_sizes)
+        else:
+            delta_size = calculate_delta_size(unique_chunk_sizes)
 
-        # ---------------------------------------------
-        # 4. Delta size
-        # ---------------------------------------------
-
-        delta_size = calculate_delta_size(
-            unique_chunk_sizes
-        )
-
-        # ---------------------------------------------
-        # 5. Savings ratio
-        # ---------------------------------------------
-
-        savings_ratio = calculate_savings_ratio(
-            original_size,
-            delta_size,
-        )
-
-        # ---------------------------------------------
-        # 6. Create result
-        # ---------------------------------------------
+        savings_ratio = calculate_savings_ratio(original_size, delta_size)
+        merkle_root = merkle_root_or_empty(ordered_hashes)
 
         return DedupResult(
             dedup_result_id=str(uuid4()),
             file_id=file_id,
             version=version,
-
             total_chunks=total_chunks,
             unique_chunks=unique_chunks,
             duplicate_chunks=duplicate_chunks,
-
             original_size=original_size,
             delta_size=delta_size,
-
             savings_ratio=savings_ratio,
-
             algorithm=algorithm,
             index_version=actual_index_version,
+            merkle_root=merkle_root,
+            previous_version_reference=previous_version_reference,
+            optimization_metric=optimization_metric,
+            index_backend=index_backend or getattr(
+                self.index, "backend_name", None
+            ),
         )
 
     # =================================================
@@ -194,3 +180,25 @@ class DeduplicationEngine:
             )
 
         return size
+
+    @staticmethod
+    def _get_chunk_reference(chunk: Any) -> str:
+        if hasattr(chunk, "chunk_id"):
+            chunk_id = chunk.chunk_id
+        elif isinstance(chunk, dict):
+            chunk_id = chunk.get("chunk_id")
+        else:
+            raise TypeError("Chunk must provide a chunk_id field")
+
+        if not chunk_id:
+            raise ValueError("Chunk id cannot be empty")
+
+        return str(chunk_id)
+
+    def _lookup_chunk(self, chunk_hash: str):
+        if hasattr(self.index, "lookup"):
+            result = self.index.lookup(chunk_hash)
+            if isinstance(result, dict):
+                return result["existing_chunk_ref"]
+            return result
+        return self.index.search(chunk_hash)

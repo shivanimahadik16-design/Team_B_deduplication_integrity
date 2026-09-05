@@ -13,6 +13,13 @@ class IntegrityVerifyRequest(BaseModel):
         max_length=64,
         description="Original Merkle root"
     )
+    verification_algorithm: str = Field(
+        default="merkle-tree",
+        pattern="^(merkle-tree|checksum)$",
+    )
+    expected_chunk_hashes: list[str] | None = None
+    benchmark_size_bytes: int = Field(default=0, ge=0)
+    repetitions: int = Field(default=1, ge=1, le=1000)
 
 
 class IntegrityVerifyResponse(BaseModel):
@@ -22,3 +29,8 @@ class IntegrityVerifyResponse(BaseModel):
     corrupted_chunks: list[int]
     verification_latency: float
     algorithm: str
+    time_complexity: str = "O(n)"
+    space_complexity: str = "O(n)"
+    benchmark: dict = {}
+    data: dict | None = None
+    meta: dict | None = None

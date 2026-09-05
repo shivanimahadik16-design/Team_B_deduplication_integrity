@@ -19,8 +19,15 @@ class AVLNode:
 class AVLTree:
     """Self-balancing AVL tree for chunk-hash lookup."""
 
+    INDEX_VERSION = "v1"
+
     def __init__(self):
         self.root = None
+
+    @property
+    def index_version(self):
+        """Return the index version."""
+        return self.INDEX_VERSION
 
     def _height(self, node):
         if node is None:
@@ -112,6 +119,10 @@ class AVLTree:
             raise ValueError("value must be a non-empty string")
 
         self.root = self._insert(self.root, key, value)
+
+    def search(self, key: str):
+        """Simple search that returns the value or None."""
+        return self.lookup(key)
 
     def lookup(self, key: str):
         """Return the value associated with a key, or None."""
@@ -208,6 +219,21 @@ class AVLTree:
             return 1 + count(node.left) + count(node.right)
 
         return count(self.root)
+
+    def items(self):
+        """Return stored key-value pairs in order."""
+
+        collected = []
+
+        def walk(node):
+            if node is None:
+                return
+            walk(node.left)
+            collected.append((node.key, node.value))
+            walk(node.right)
+
+        walk(self.root)
+        return collected
 
     def clear(self) -> None:
         """Remove all nodes."""

@@ -21,3 +21,8 @@ class DedupResult(BaseModel):
 
     algorithm: str
     index_version: str
+    algorithm_version: str = "v1"
+    merkle_root: str
+    previous_version_reference: str | None = None
+    optimization_metric: str = "minimize_delta"
+    index_backend: str | None = None

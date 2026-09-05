@@ -1,9 +1,52 @@
 import hashlib
 
 
+EMPTY_MERKLE_ROOT = hashlib.sha256(b"").hexdigest()
+
+
 def sha256(data: str) -> str:
     """Return the SHA-256 hexadecimal digest of a string."""
     return hashlib.sha256(data.encode("utf-8")).hexdigest()
+
+
+def merkle_root_or_empty(chunk_hashes: list[str]) -> str:
+    if not chunk_hashes:
+        return EMPTY_MERKLE_ROOT
+    return build_merkle_root(chunk_hashes)
+
+
+def localize_corrupted_chunks(
+    chunk_hashes: list[str],
+    reference_chunk_hashes: list[str] | None,
+    verified: bool,
+) -> tuple[list[int], list[int]]:
+    """
+    Identify corrupted leaves when a reference hash list is provided.
+
+    A root mismatch without reference hashes cannot isolate a leaf, so
+    every index is reported as corrupted.
+    """
+    if verified:
+        return list(range(len(chunk_hashes))), []
+
+    if reference_chunk_hashes is None:
+        return [], list(range(len(chunk_hashes)))
+
+    verified_chunks = []
+    corrupted_chunks = []
+    max_len = max(len(chunk_hashes), len(reference_chunk_hashes))
+    for index in range(max_len):
+        current = chunk_hashes[index] if index < len(chunk_hashes) else None
+        expected = (
+            reference_chunk_hashes[index]
+            if index < len(reference_chunk_hashes)
+            else None
+        )
+        if current == expected and current is not None:
+            verified_chunks.append(index)
+        else:
+            corrupted_chunks.append(index)
+    return verified_chunks, corrupted_chunks
 
 
 def build_merkle_root(chunk_hashes: list[str]) -> str:

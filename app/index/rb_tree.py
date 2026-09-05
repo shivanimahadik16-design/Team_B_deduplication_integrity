@@ -23,12 +23,19 @@ class RBNode:
 class RBTree:
     """Self-balancing Red-Black Tree for chunk-hash lookup."""
 
+    INDEX_VERSION = "v1"
+
     def __init__(self):
         self.NIL = RBNode()
         self.NIL.color = RBNode.BLACK
 
         self.root = self.NIL
         self._size = 0
+
+    @property
+    def index_version(self):
+        """Return the index version."""
+        return self.INDEX_VERSION
 
     def _left_rotate(self, x):
         y = x.right
@@ -146,6 +153,10 @@ class RBTree:
         self._size += 1
         self._insert_fixup(node)
 
+    def search(self, key: str):
+        """Simple search that returns the value or None."""
+        return self.lookup(key)
+
     def lookup(self, key: str):
         """Return the value associated with a key, or None."""
 
@@ -169,6 +180,32 @@ class RBTree:
     def size(self) -> int:
         """Return the number of stored keys."""
         return self._size
+
+    def items(self):
+        """Return stored key-value pairs in order."""
+
+        collected = []
+
+        def walk(node):
+            if node == self.NIL:
+                return
+            walk(node.left)
+            collected.append((node.key, node.value))
+            walk(node.right)
+
+        walk(self.root)
+        return collected
+
+    def remove(self, key: str) -> bool:
+        """Remove a key by rebuilding the tree without it."""
+        if not self.contains(key):
+            return False
+
+        remaining = [(item_key, value) for item_key, value in self.items() if item_key != key]
+        self.clear()
+        for item_key, value in remaining:
+            self.insert(item_key, value)
+        return True
 
     def clear(self) -> None:
         """Remove all entries."""
