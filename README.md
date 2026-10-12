@@ -182,9 +182,77 @@ pip install -r requirements.txt
 
 ### Running the API Server
 
-```bash
-uvicorn app.main:app --reload --port 8000
+For local development on Windows, start the server from the repository root:
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 --env-file .env
 ```
+
+`--env-file` must be followed by a file path. Use `.env` if you have created and
+configured that file; otherwise remove `--env-file .env` from the command.
+Binding to `0.0.0.0` lets other devices on your local network reach the server.
+
+To let Team C connect over Wi-Fi, make sure both computers are on the same
+network. On the Team B computer, run `ipconfig` and find the IPv4 Address under
+the Wi-Fi adapter. Team C should use `http://<TEAM_B_IPV4>:8000` as the Team B
+base URL (for example, `http://192.168.1.25:8000`), replacing it with the
+current address. The address can change when you switch Wi-Fi networks. If
+Team C cannot connect, check that Windows Firewall allows inbound TCP traffic
+on port 8000 for the network profile in use.
+
+### Optional real object-storage integration (B2 S3-compatible)
+
+Install dependencies with `pip install -r requirements.txt`, then configure
+this environment block before starting the server. Use a real `.env` file for
+actual credentials, while keeping an example-only `.env.example` in the repo:
+
+```text
+STORAGE_MODE=real
+STORAGE_ENDPOINT=https://s3.us-east-005.backblazeb2.com
+STORAGE_REGION=us-east-005
+STORAGE_BUCKET=smart-file-backup
+STORAGE_ACCESS_KEY=
+STORAGE_SECRET_KEY=
+STORAGE_USE_SSL=true
+```
+
+Do not commit real credentials. Team B accepts both the legacy `MINIO_*` names
+and the B2 `STORAGE_*` names for compatibility. The real-storage path expects the
+S3-compatible Backblaze B2 endpoint and uses the configured bucket as the source
+of truth.
+
+`POST /api/v1/dedup/compute` accepts the existing local-file/hash request
+formats and also accepts a storage reference using the agreed provider value:
+
+```json
+{
+  "backup_id": "backup-123",
+  "file_id": "file-123",
+  "version_id": "version-1",
+  "storage": {
+    "provider": "backblaze-b2",
+    "bucket": "smart-file-backup",
+    "key": "incoming/report.pdf"
+  },
+  "chunk_size": 4096,
+  "hash_algorithm": "sha256"
+}
+```
+
+The requested bucket must match the configured storage bucket. Unique chunks are
+written to `chunks/<algorithm>/<first-two-hash-characters>/<full-hash>`. Team B
+stores manifests and dedup results in the same bucket under the `_team_b/` prefix;
+these are separate from Team C's metadata and restore records. The ordered chunk
+manifest is included in the dedup response for Team C to persist/use.
+
+`POST /api/v1/integrity/verify` continues to accept the original hash-list
+request and additionally accepts `{"backup_id":"backup-123"}`. In backup-ID mode,
+Team B loads manifests from the configured object store and hashes the referenced
+chunk bytes. The most recently saved integrity result for a backup can be retrieved
+with `GET /api/v1/integrity/{backup_id}`. `GET /api/v1/dedup/{result_id}` loads
+saved results from the configured storage backend when absent from process memory.
+The chunk-index and metrics endpoints include storage-backed statistics when the
+real object store is configured.
 
 - **Interactive Swagger Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
 - **ReDoc Specification**: [http://localhost:8000/redoc](http://localhost:8000/redoc)
@@ -265,3 +333,7 @@ Team_B_deduplication_integrity/
 ├── pytest.ini                   # Test configuration
 └── requirements.txt             # Python dependencies
 ```
+
+## License
+
+Academic / Mini-Project Use � APNILEAP Team B Implementation.
