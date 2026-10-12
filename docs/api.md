@@ -349,3 +349,7 @@ All requests to Team B accept or return the following standard headers:
     "meta": { "correlation_id": "...", "api_version": "v1" }
   }
   ```
+
+## Maintenance & Support
+
+Maintained by Team B (Deduplication & Integrity Engine).
