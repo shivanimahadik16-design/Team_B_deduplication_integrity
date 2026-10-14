@@ -9,6 +9,8 @@ from app.dedup.engine import (
 from app.index.hashmap_index import HashMapIndex
 from app.hashing.hasher import Hasher
 from app.api.contracts import success_envelope
+from app.services.minio_processing import deduplicate_minio_object
+from app.services.minio_store import MinioConfigurationError, MinioStore
 
 
 router = APIRouter(
@@ -22,9 +24,12 @@ dedup_results: dict[str, dict] = {}
 
 class DedupRequest(BaseModel):
     file_id: str
+    backup_id: str | None = None
+    version_id: str | None = None
     version: int = 1
     file_path: str | None = None
     chunk_hashes: list[str] | None = None
+    storage: dict[str, str] | None = None
     chunk_size: int = 4096
     expected_index_version: str | None = None
     previous_version_reference: str | None = None
@@ -54,6 +59,53 @@ def deduplicate_file(
             raise ValueError("unsupported optimization_metric")
 
         hasher = Hasher(request.hash_algorithm)
+
+        if request.storage is not None:
+            if not request.backup_id or not request.version_id:
+                raise ValueError(
+                    "backup_id and version_id are required with storage"
+                )
+
+            provider = str(request.storage.get("provider", "")).strip().lower()
+            normalized_provider = {
+                "minio": "minio",
+                "backblaze-b2": "backblaze-b2",
+                "backblaze_b2": "backblaze-b2",
+                "b2": "backblaze-b2",
+                "s3": "backblaze-b2",
+            }.get(provider, provider)
+
+            if normalized_provider not in {"minio", "backblaze-b2"}:
+                raise ValueError(
+                    "storage.provider must be 'minio' or 'backblaze-b2'"
+                )
+
+            bucket = request.storage.get("bucket", "").strip()
+            object_name = request.storage.get("key", "").strip()
+            if not bucket or not object_name:
+                raise ValueError(
+                    "storage.bucket and storage.key are required"
+                )
+            store = MinioStore.from_env()
+            if bucket != store.default_bucket:
+                raise ValueError(
+                    "storage.bucket must match configured storage bucket"
+                )
+            result_data, manifest = deduplicate_minio_object(
+                store=store,
+                bucket=bucket,
+                object_name=object_name,
+                backup_id=request.backup_id,
+                file_id=request.file_id,
+                version_id=request.version_id,
+                chunk_size=request.chunk_size,
+                hash_algorithm=request.hash_algorithm,
+                storage_provider=normalized_provider,
+            )
+            store.save_manifest(manifest)
+            store.save_result(result_data)
+            dedup_results[result_data["dedup_result_id"]] = result_data
+            return success_envelope(result_data, x_correlation_id)
 
         if request.file_path:
             chunks = fixed_size_chunks(
@@ -97,6 +149,9 @@ def deduplicate_file(
             detail=str(exc),
         )
 
+    except MinioConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
     except (FileNotFoundError, ValueError, TypeError) as exc:
         raise HTTPException(
             status_code=400,
@@ -110,6 +165,13 @@ def get_dedup_result(
     x_correlation_id: str | None = Header(default=None),
 ):
     result = dedup_results.get(result_id)
+    if result is None:
+        try:
+            store = MinioStore.optional_from_env()
+        except MinioConfigurationError as exc:
+            raise HTTPException(status_code=503, detail=str(exc))
+        if store is not None:
+            result = store.get_result(result_id)
     if result is None:
         raise HTTPException(status_code=404, detail="Deduplication result not found")
 

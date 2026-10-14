@@ -1,0 +1,305 @@
+=== SLIDE 1 (ppt/slides/slide1.xml) ===
+RAJARAMBAPU INSTITUTE OF TECHNOLOGY, RAJARAMNAGAR
+Department of Computer Science and Engineering
+MINI PROJECT — REVIEW V
+System Validation, Final Release & Consolidated Learning
+V Semester · AY 2026–27 · S6 + S7 · Final Review (/30)
+Project Title
+Smart File Backup System — Team B: Deduplication & Integrity Engine
+Team No. / Batch
+Team B – B2
+Review Date
+14/10/2026
+Team Members (Roll No.)
+S1 Asmita Madkholkar · S2 Shivani Mahadik · S3 Radhika Mane · S4 Anjali Motkatte
+Mentor / Guide
+Ms. Roopa Gaur
+APNI-Leap Mini Project · Review-V (Final) · Dept. of CSE, RIT Rajaramnagar
+
+=== SLIDE 2 (ppt/slides/slide2.xml) ===
+PRESENTATION ROADMAP
+What We Will Cover
+Review-V is the final gate: it validates the complete system, confirms release readiness, and closes individual learning.
+01
+Final System Overview
+What was delivered, end to end?
+02
+UAT & Final Demonstration
+Does it meet acceptance criteria?
+03
+KPI Achievement & Benchmarks
+Were the S1 performance targets met?
+04
+Reliability & Deployment Readiness
+Can this go live and stay up?
+05
+Release, Documentation & Traceability
+Is the release stable and documented?
+06
+Individual Contribution & Learning
+What did each member build and learn?
+APNI-Leap Mini Project · Review-V (Final) · Dept. of CSE, RIT Rajaramnagar
+2
+
+=== SLIDE 3 (ppt/slides/slide3.xml) ===
+SYSTEM-LEVEL VIEW
+Final System Overview
+What the complete, integrated Team B service delivers today — and where it sits in the APNILEAP platform.
+APNI-Leap Mini Project · Review-V (Final) · Dept. of CSE, RIT Rajaramnagar
+3
+Team D — Backup Control & Restore Dashboard (Web UI + BFF)
+Team C — Metadata, Version & Restore Manager (authoritative DB)
+Team A — Job Scheduler (OS)
+TEAM B — Dedup & Integrity (DSA)
+REST /api/v1
+chunk / dedup / verify
+B1
+Chunk & Hash
+Asmita
+B2
+Dedup & Delta
+Shivani
+B3
+Hash Index
+Radhika
+B4
+Merkle tree
+Anjali
+Pipeline: chunk → dedup → lookup → verify
+DELIVERED SCOPE
+Fixed-size + Rabin-Karp content-defined chunking
+SHA-256 / SHA-1 hashing registry
+Dedup & delta: unique/duplicate split, savings ratio
+HashMap / AVL / Red-Black index + cache
+Merkle verification, corrupt-chunk localization
+9 REST routes + health/ready, Swagger docs
+RELEASE IDENTITY
+Version: 
+API v1.0.0 (OAS 3.1)   
+Tag: 
+[Git tag]
+Stack: 
+Python 3.11+, FastAPI, Uvicorn
+Deploy: 
+uvicorn app.main:app (port 8000)
+Descoped: 
+durable store (Team C owns metadata)
+
+=== SLIDE 4 (ppt/slides/slide4.xml) ===
+CRITERION 1 · SYSTEM VALIDATION, UAT & FINAL DEMONSTRATION
+5 marks / student
+UAT & Final Demonstration
+Critical end-to-end user journeys pass acceptance criteria, with recorded stakeholder sign-off.
+User Journey
+Acceptance Criteria
+Status
+Sign-off
+Journey 1 — Chunk a file
+Fixed & content-defined chunks created; SHA-256 hashes; coverage summary returned
+Pass
+Stakeholder name, date]
+Journey 2 — Deduplicate
+Identical / partial / unique files give exact unique-duplicate split and savings
+Pass
+Stakeholder name, date]
+Journey 3 — Index lookup
+HashMap / AVL / RB lookup returns chunk ref, µs timing, cache hit; invalidate works
+Pass
+Stakeholder name, date]
+Journey 4 — Merkel Tree
+Merkle root matches; tampered chunk indices localized
+Pass
+[Stakeholder name, date]
+End-to-end: chunk → 
+dedup
+ → hash lookup → Merkel Tree , demonstrated via Swagger (/docs) and the 62-test 
+pytest
+ suite.
+APNI-Leap Mini Project · Review-V (Final) · Dept. of CSE, RIT Rajaramnagar
+4
+
+=== SLIDE 5 (ppt/slides/slide5.xml) ===
+CRITERION 2 · KPI ACHIEVEMENT & BENCHMARK EVIDENCE
+5 marks / student
+KPI Achievement & Benchmarks
+Every approved KPI measured as planned at S1, with reproducible logs (benchmarks/perf_results.json).
+APNI-Leap Mini Project · Review-V (Final) · Dept. of CSE, RIT Rajaramnagar
+5
+INDEX LOOKUP P95 · 10,000 ENTRIES · TARGET 1000 MICROSECONDS
+Memory (KiB)
+HashMap  1,188
+AVL  2,079
+Red-Black  2,157
+Hash: O(1) avg · trees: O(log n)
+KPI
+Threshold
+Achieved
+Status
+Dedup accuracy
+100% ref sets
+Identical/partial/unique pass
+MET
+Dedup ratio
+0 deviation
+Exact (orig−delta)/orig
+MET
+Computation p95
+≤ 100 ms
+15.55 ms
+MET
+Index consistency
+index_version
+Mismatch → rejected (409)
+MET
+Lookup p95
+≤ 1 ms
+0.5–4.0 µs
+MET
+
+=== SLIDE 6 (ppt/slides/slide6.xml) ===
+CRITERION 3 · RELIABILITY, DEPLOYMENT & OPERATIONAL READINESS
+10 marks / student
+Reliability & Deployment Readiness
+Highest-weighted criterion — consistency, recovery, security/config, monitoring, and a deploy + rollback plan.
+APNI-Leap Mini Project · Review-V (Final) · Dept. of CSE, RIT Rajaramnagar
+6
+Clone repo
+venv + pip install
+uvicorn app.main:app
+GET /health · /ready
+pytest (62 pass)
+Tag release
+LOAD & CONSISTENCY
+OK
+Deterministic chunking + Merkle; index_version mismatch → HTTP 409; 10 MB in 15.55 ms p95.
+Gap: 200 req/s load test not recorded.
+RECOVERY / FAULT TOLERANCE
+PARTIAL
+Stateless compute; TTL expiry + cache invalidation endpoint restore a clean index.
+Gap: registry is in-memory — Team C is the durable owner.
+SECURITY & CONFIGURATION
+PATIAL
+Bearer auth via TEAM_B_API_TOKEN; correlation-ID; safe error envelope; rate limit 1000 req/s.
+Gap: auth is opt-in; CORS open — restrict to Team D.
+MONITORING
+OK
+/health, /ready, GET /api/v1/metrics/dedup (latency, cache hits, complexity), X-Correlation-ID logs.
+Gap: no external alerting.
+Deployment & Rollback Plan: 
+deploy steps above are repeatable from requirements.txt; rollback = redeploy the previous git tag (to be rehearsed before demo).
+
+=== SLIDE 7 (ppt/slides/slide7.xml) ===
+CRITERION 4 · STABILIZED RELEASE, DOCUMENTATION, RTM & TRACEABILITY
+5 marks / student
+Release & Documentation Readiness
+Integrated, stable, reproducible release — full regression passed, defects closed and retested.
+APNI-Leap Mini Project · Review-V (Final) · Dept. of CSE, RIT Rajaramnagar
+7
+62 / 62
+tests (latest local run)
+0
+failures
+19
+commits · 5 branches
+v1.0.0
+API version
+COMMITTED TEST FUNCTIONS PER MODULE (59 IN REPO)
+Index (HashMap)
+10
+RB Tree
+9
+API contract
+9
+AVL Tree
+8
+Dedup
+6
+Hashing
+6
+Verifier
+4
+Merkle / Integrity API
+6
+Chunking
+1
+DOCUMENT & TRACEABILITY CHECKLIST
+✓
+Test & benchmark evidence attached (perf_results.json)
+✓
+Git history reflects all four engine owners
+✓
+README, docs/architecture.md, docs/api.md present
+✓
+OpenAPI / Swagger contract published
+RTM finalized — every requirement traced to a test
+Final project report complete
+Source repository tagged at release
+Knowledge handover notes recorded
+DEFECT CLOSURE
+Automated failures: 0 · Critical/High defects: none open in current run. Known qualifications (open CORS, opt-in auth, in-memory registry) are logged as backlog, not defects.
+✓
+✓
+✓
+✓
+
+=== SLIDE 8 (ppt/slides/slide8.xml) ===
+CRITERION 5 · INDIVIDUAL VIVA, CONTRIBUTION & CONSOLIDATED LEARNING
+5 marks / student
+Individual Contribution & Learning
+Each member explains their subsystem, design decisions, debugging, course links, and personal learning.
+APNI-Leap Mini Project · Review-V (Final) · Dept. of CSE, RIT Rajaramnagar
+8
+Student
+Subsystem
+Key Decision Defended
+Course Link
+Biggest Learning
+S1  Asmita Madkholkar
+B1 — Chunking & Hashing
+Fixed 4 KB baseline plus Rabin-Karp content-defined chunking to avoid boundary-shift loss
+DSA — rolling hash
+Learned how to design content-defined chunking and maintain reliable chunk boundaries.
+S2  Shivani Mahadik
+B2 — Dedup & Delta  +  API / Testing / Integration
+B2: exact savings (orig−delta)/orig, reject mismatched index_version. API: FastAPI contracts, standard envelopes, 62-test suite and benchmark evidence
+DSA — hashing & sets; SE — testing; CN — REST
+Learned deduplication and delta-based storage optimization, REST API integration, cross-team coordination, and end-to-end testing to ensure reliable communication between subsystems
+.
+S3  Radhika Mane
+B3 — Hash Index & Lookup
+Unified adapter over HashMap / AVL / Red-Black to compare O(1) vs O(log n) and memory
+DSA — balanced BSTs
+Learned to compare hash indexing structures and balance lookup performance with memory usage.
+S4  Anjali Motkatte
+B4 — Merkle Integrity
+Deterministic leaf order + odd-leaf duplication so roots reproduce; localize corrupt chunks
+DSA — trees; Security
+Learned how Merkle Trees detect data tampering and help locate corrupted chunks.
+
+=== SLIDE 9 (ppt/slides/slide9.xml) ===
+CLOSING THE PROJECT
+Project Closure Summary
+WHAT WE BUILT & WHY IT MATTERS
+Team B is the deterministic Data-Structures engine of the Smart File Backup System: it chunks files, hashes and de-duplicates them, indexes chunks with swappable HashMap/AVL/Red-Black structures, and proves integrity with Merkle trees — cutting stored bytes while keeping every backup verifiable.
+File
+B1 Chunk + Hash
+B2 Dedup + Delta
+B3 Index + Cache
+B4 Merkle Verify
+Verified result
+FUTURE SCOPE
+Durable chunk registry via Team C
+Expose previous_version_hashes and index_backend in the public API
+Repeated-backup cache benchmark (≥80%) and 200 req/s load test
+Distributed rate limiting; mandatory auth; restricted CORS
+ACKNOWLEDGEMENTS
+Mentor / Guide: Ms. Roopa Gaur
+Department of CSE, RIT Rajaramnagar
+APNILEAP blueprint · FastAPI · pytest · GitHub
+APNI-Leap Mini Project · Review-V (Final) · Dept. of CSE, RIT Rajaramnagar
+9
+
+=== SLIDE 10 (ppt/slides/slide10.xml) ===
+Thank You
+Team B – B2  ·  Smart File Backup System  ·  Mentor: Ms. Roopa Gaur
+

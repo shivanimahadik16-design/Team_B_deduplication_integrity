@@ -10,6 +10,7 @@ from app.index.avl_tree import AVLTree
 from app.index.rb_tree import RBTree
 from app.api.routes_dedup import index as dedup_index
 from app.api.contracts import success_envelope
+from app.services.minio_store import MinioConfigurationError, MinioStore
 
 
 router = APIRouter(
@@ -173,10 +174,17 @@ def benchmark_indexes(size: int = 1000):
         "dataset_size": size,
         "results": results,
         "cache": dedup_index.get_stats(),
+        "operational_stats": None,
         "complexity": {
             "HashMap": {"time": "O(1) average", "space": "O(n)"},
             "AVL": {"time": "O(log n)", "space": "O(n)"},
             "RedBlack": {"time": "O(log n)", "space": "O(n)"},
         },
     }
+    try:
+        store = MinioStore.optional_from_env()
+    except MinioConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    if store is not None:
+        response["operational_stats"] = store.get_dedup_statistics()
     return success_envelope(response)

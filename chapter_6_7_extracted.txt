@@ -1,0 +1,410 @@
+Chapter 6: System Integration
+The four engines were built separately and met only at the contracts in the blueprint, so integration was the first time real requests crossed team boundaries. We followed the order in the integration plan: identity and metadata first, then storage, backup job, dedup and integrity, restore. Rule one was no mock success: a backup counts as done only when real bytes are stored and the checksums match.
+6.1 Pairwise Integration
+Table 6.1 records each pair of engines. For Team B, the Team C pair is the important one: Team C owns the file, version and backup identifiers and sends Team B a storage reference, and Team B returns the dedup result, the chunk manifest and the Merkle root. Team B side of this contract has been tested with a stand-in object store; the live run is still to be recorded.
+Table 6.1: Pairwise integration results
+Engine Pair
+Contract / Interface
+Data Flow Verified
+Test ID
+Result
+A ↔ C
+POST /api/v1/backup/jobs; /internal/v1/locks/acquire and DELETE (lease)
+Job request from C; decision_id and lease_id back to C; lease released on cancel or failed commit
+IT-01
+[result]
+B ↔ C
+POST /api/v1/dedup/compute with storage reference; POST /api/v1/integrity/verify; GET /api/v1/dedup/{id}
+backup_id, file_id, version_id and bucket key in; DedupResult, manifest and merkle_root out; VERIFIED or FAILED
+IT-02
+Team B side passes with a stand-in store (test_minio_processing). 
+C ↔ D
+POST /api/v1/backups; GET /api/v1/backups/{id}; user and role headers
+D creates backup through C; C returns the aggregate state D displays
+IT-03
+[result]
+B ↔ D
+GET /api/v1/chunks/index; GET /api/v1/metrics/dedup; POST /api/v1/integrity/verify {backup_id}
+Chunk coverage, dedup metrics and integrity status shown on the dashboard
+IT-04
+[result]
+A ↔ B
+Whether A or C calls B for chunking and dedup
+Agreed in the integration plan: C calls B after A grants a lease
+IT-05
+[result]
+6.2 End-to-End Workflow
+We ran the full journey for one small real file with a known checksum: upload, backup, dedup, verify, restore, then a second backup of the same file to see the dedup saving. At each step we checked the state held by each engine and the audit record, and followed one correlation ID through every log.
+Figure 6.1: End-to-end sequence
+Table 6.2: End-to-end scenario
+Step
+Action
+Engines
+Expected
+Observed
+Correlation ID
+Result
+1
+User asks for a backup of a registered file
+D
+Form validated, correlation ID and idempotency key created
+[ ]
+[ ]
+[ ]
+2
+Backup workflow created
+D, C
+Backup in REQUESTED state; same key twice gives one backup
+[ ]
+[ ]
+[ ]
+3
+Job queued and worker leased
+C, A
+Lease or waitlist outcome returned
+[ ]
+[ ]
+[ ]
+4
+Chunk and dedup
+C, B, storage
+unique + duplicate = total; chunks present in bucket; manifest saved
+[ ]
+[ ]
+[ ]
+5
+Integrity check
+C, B
+verified = true; merkle_root equals manifest
+[ ]
+[ ]
+[ ]
+6
+Commit
+C
+Backup, version, chunk references, audit and outbox in one transaction
+[ ]
+[ ]
+[ ]
+7
+Dashboard update
+D
+Real state, dedup saving and integrity shown within 2 s
+[ ]
+[ ]
+[ ]
+8
+Restore and checksum compare
+C, A, B, D
+Restored bytes match the original checksum
+[ ]
+[ ]
+[ ]
+9
+Backup same file again
+C, B
+All chunks duplicate; savings near 100%
+[ ]
+[ ]
+[ ]
+10
+Failure path (missing credential or unavailable service)
+all
+Clear error in the UI; no orphan lease
+[ ]
+[ ]
+[ ]
+6.3 Integration Defects and Reviews
+The defects below were found while comparing the engines' contracts before the integration run. Status is as of writing and must be updated after the run.
+Table 6.3: Integration defects
+Defect ID
+Description
+Engines
+Status
+ID-01
+Team D calls GET /api/v1/users/by-username for login; Team C has not confirmed this route or its authentication
+C, D
+Open
+ID-02
+Team D's backup flow does not call dedup compute, and no one owned the call between A, B and C
+A, B, C, D
+Agreed: C calls B after A grants a lease. [verify]
+ID-03
+Team B only read local file paths, which do not exist on another team's laptop
+B, C
+Fixed on Team B side with bucket references; [joint test]
+ID-04
+Team D sends verify with only a backup_id; Team B required a hash list
+B, D
+Fixed on Team B side; [joint test]
+ID-05
+Repeating dedup compute for a backup returns an all-duplicate result (see DB-B07)
+B, C
+Open
+ID-06
+Mapping between Team D user IDs and Team C numeric IDs is unconfirmed
+C, D
+Open
+Chapter 7: System Validation and Hardening
+7.1 Test Strategy and Environment
+We tested at five levels. Unit tests with pytest cover each engine's algorithms. Contract tests check each service's requests and responses against the shared envelopes and headers, using mocks written before the producer was ready. Pairwise and end-to-end tests run real requests across engines. Negative and security tests cover bad input, missing credentials and unsafe retries. Performance tests measure latency, load and recovery. Every KPI has a method, a threshold and a place for raw results.
+Environment. Services run on team laptops on the college network, with Python 3.14, FastAPI and uvicorn. Shared storage is a Backblaze B2 bucket (S3-compatible, region us-east-005). The load model follows the blueprint: 200 requests per second against Team B, and 200 concurrent users for 30 minutes against the whole system. Reference machine: [CPU, RAM, OS]. [Load tool name and version]. A laptop on Wi-Fi is a same-network demo, not a public deployment, and we describe it that way.
+7.2 Functional, Security and Load Validation
+Table 7.1: Requirement coverage (Team B rows; other teams add theirs)
+Req. ID
+Test IDs
+Result
+Evidence
+FR-B01
+TC-B01
+Fail
+tests/test_chunking.py; DB-B05
+FR-B02
+chunking_comparison.py
+Pass
+benchmarks/chunking_comparison_results.json [commit]
+FR-B03
+TC-B02, B03
+Pass
+tests/test_hashing.py
+FR-B05
+TC-B04 to B07, B13
+Pass; B13 [confirm]
+tests/test_dedup.py, test_apnileap_api.py
+FR-B06
+TC-B08
+Pass
+tests/test_dedup.py
+FR-B07
+TC-B09, B14
+Pass; B14 [confirm]
+tests/test_index.py, test_avl_tree.py, test_rb_tree.py
+FR-B08
+TC-B10 to B12
+Pass; B12 [confirm]
+tests/test_merkle.py, test_verifier.py
+FR-B10
+TC-B16
+[confirm]
+tests/test_minio_processing.py
+FR-B11
+TC-B15
+[confirm]
+tests/test_apnileap_api.py
+Teams A, C, D
+[add]
+[add]
+[add]
+Table 7.2: Security / negative tests
+Test
+Negative Test
+Expected
+Observed (Team B)
+Result
+S1
+Unauthorised role access
+401 without a valid credential
+Bearer check works when TEAM_B_API_TOKEN is set (TC-B15). Team B has service tokens only; user roles are enforced by C and D. [whole-system run]
+[confirm]
+S2
+Injection attempt
+Rejected input, no file or command access
+No SQL in Team B. file_path is used as given, so a path outside the data folder is not blocked (DB-B09). Path test not yet written
+Open
+S3
+Malformed / oversized input
+422 or 400, no crash
+Schema checks reject bad hash length, repetitions above 1,000 and unknown algorithms; missing hash list gives 422. Oversized upload not tested
+Partly done
+S4
+Secret leakage
+No keys in Git or client code
+Storage keys sit in .env, which is ignored; git log shows .env was never committed. .env.example holds blanks
+Pass
+S5
+Unsafe retry / replay
+Same request gives the same outcome
+Repeating dedup compute returns an all-duplicate result (DB-B07)
+Fail
+Table 7.3: Load and performance
+Scenario
+Load Profile
+Metric
+Target
+Result
+Hash-index lookup (Team B)
+1,000 lookups on 1,000, 5,000 and 10,000 keys
+p95 lookup
+<= 1 ms
+<= 4.0 µs
+Hash a 10 MB file (Team B)
+2,560 chunks, 20 trials
+p95 latency
+<= 100 ms
+15.55 ms (hashing only)
+Team B API load
+200 requests/s
+Failed requests
+< 1%
+[not run]
+Verification after commit
+One backup
+p95 latency
+<= 500 ms
+[not run]
+System load
+200 concurrent users, 30 minutes
+Successful outcomes; 5xx
+≥ 99%; < 1%
+[not run]
+Backup completion
+As above
+p95 submit to COMMITTED
+<= 2.0 s
+[not run]
+7.3 System KPI Results (System Gate 4)
+Table 7.4 lists the system-level targets from the blueprint and Team B's own KPIs. Teams A, C and D add their rows from their engine chapters. A KPI is marked Pass only when raw results exist in the evidence pack.
+Table 7.4: System KPI sheet
+KPI ID
+Engine
+Method
+Target
+Achieved
+Pass / Fail
+E2E-1
+All
+Distributed trace, load test
+p95 <= 2.0 s submit to commit
+[ ]
+[ ]
+E2E-2
+All
+State-machine test suite
+0 illegal transitions
+[ ]
+[ ]
+E2E-3
+All
+Reconciliation query
+Every committed backup has a valid dedup result
+[ ]
+[ ]
+E2E-4
+All
+Duplicate-submission tests
+Same key returns original outcome
+[ ]
+[ ]
+E2E-5
+All
+Log and audit inspection
+Every call searchable by correlation ID
+[ ]
+[ ]
+E2E-6
+All
+30-minute load test
+≥ 99% success, < 1% 5xx
+[ ]
+[ ]
+E2E-7
+All
+Fault injection
+No orphan lease after timeout
+[ ]
+[ ]
+KPI-B1
+B
+Reference file sets
+100% expected split
+Matched
+Pass
+KPI-B2
+B
+Hand calculation
+0 deviation
+0 deviation
+Pass
+KPI-B3
+B
+run_benchmarks.py
+p95 <= 100 ms
+15.55 ms
+Pass (hashing only)
+KPI-B4
+B
+Version tests
+Stale versions rejected
+409 returned
+Pass
+KPI-B5
+B
+run_benchmarks.py
+p95 <= 1 ms
+<= 4.0 µs
+Pass
+KPI-B6
+B
+Repeated-backup benchmark
+≥ 80% hit rate
+[not run]
+Open
+KPI-B7
+B
+Load test
+< 1% failures at 200/s
+[not run]
+Open
+7.4 Cross-Engine RCA and Hardening (System Gate 5)
+Table 7.5: System-level RCA
+Defect ID
+Failure
+Root Cause
+Corrective Action
+Regression / KPI Re-test
+SD-01
+Retried dedup returns "all duplicate"
+Index updated during compute; no idempotency record
+Store result per backup_id and version_id; return it on retry. C sends one Idempotency-Key per backup
+[re-run S5 and E2E-4]
+SD-02
+Backup flow never reached dedup
+No owner for the call between A, B and C
+C calls B after A grants a lease
+[re-run IT-05, step 4]
+SD-03
+Verify by backup_id failed
+B accepted only hash lists
+backup_id mode reads manifests and re-hashes stored chunks
+[joint run, step 5]
+SD-04
+B could not read a file saved on another laptop
+Local file paths in the contract
+Shared bucket reference everywhere
+[joint run, step 4]
+7.5 Lessons Learned
+Table 7.6: Knowledge captured
+Lesson
+Stage
+Recommended Practice
+Our first API did not match what the dashboard already called
+S3
+Collect the consumer's real calls before freezing the contract, and write one shared sheet of fields
+A one-letter folder typo caused merge conflicts across branches
+S5
+Agree package names on day one; rename in one commit and tell everyone
+A shared sample file made a test fail when someone edited the file
+S6
+Create test data inside the test (tmp_path) instead of sharing a checked-in file
+Our 10 MB benchmark measured only hashing, yet the KPI said "per 10 MB file"
+S6
+Benchmark the path the KPI describes, or state exactly what was measured
+Retries were an afterthought, and a retry gave a wrong answer
+S4
+Make every create or commit call safe to repeat before writing the happy path
+Finished code sat uncommitted while the evidence was due
+S5
+Run git status before each gate; the untracked list should be empty
+README numbers drifted from the benchmark file
+S6
+Quote results from the saved result file, never from memory

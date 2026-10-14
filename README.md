@@ -125,6 +125,7 @@ Team B is decoupled from the transactional state store (Team C) and user present
         "api_version": "v1"
       }
     }
+    
     ```
   - **Error**:
     ```json
@@ -336,4 +337,4 @@ Team_B_deduplication_integrity/
 
 ## License
 
-Academic / Mini-Project Use — APNILEAP Team B Implementation.
+Academic / Mini-Project Use ï¿½ APNILEAP Team B Implementation.

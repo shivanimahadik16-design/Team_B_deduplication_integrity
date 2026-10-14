@@ -10,6 +10,7 @@ from app.api.contracts import success_envelope
 
 from app.chunking.fixed import fixed_size_chunks
 from app.chunking.content_defined import content_defined_chunks
+from app.services.minio_store import MinioConfigurationError, MinioStore
 
 
 router = APIRouter(
@@ -160,6 +161,25 @@ def register_chunk(
 
 @router.get("/index")
 def get_chunks_index():
+    try:
+        store = MinioStore.optional_from_env()
+    except MinioConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    if store is not None:
+        statistics = store.get_chunk_statistics()
+        response = {
+            "total_chunks": statistics["unique_chunks"],
+            "unique_chunks": statistics["unique_chunks"],
+            "duplicate_chunks": 0,
+            "coverage_percent": 100.0 if statistics["unique_chunks"] else 0.0,
+            "total_size_bytes": statistics["total_size_bytes"],
+            "chunk_version": "v1",
+            "chunks": [],
+            "storage_backend": getattr(store, "provider", "backblaze-b2"),
+            "healthy": True,
+        }
+        return success_envelope(response)
+
     total_chunks = len(chunk_registry)
     total_bytes = sum(
         chunk["size_bytes"]
@@ -174,5 +194,7 @@ def get_chunks_index():
         "total_size_bytes": total_bytes,
         "chunk_version": "v1",
         "chunks": list(chunk_registry.values()),
+        "storage_backend": "memory",
+        "healthy": True,
     }
     return success_envelope(response)
